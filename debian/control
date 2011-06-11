@@ -1,0 +1,14 @@
+Source: m4api
+Section: utilities
+Priority: extra
+Maintainer: Ken Tossell <ktossell@umd.edu>
+Build-Depends: debhelper (>= 7.0.50~), cmake, libusb-dev, pkg-config
+Standards-Version: 3.8.4
+Homepage: http://ram.umd.edu/wiki/Public/Software/m4api
+Vcs-Git: git://ram.umd.edu/bits/m4api.git
+Vcs-Browser: http://ram.umd.edu/git/bits/m4api.git
+
+Package: m4api
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libusb-0.1-4
+Description: utility/library for Mini-Box M4-ATX power supplies
