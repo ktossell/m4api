@@ -210,6 +210,13 @@ m4Handle *m4Init() {
   return NULL;
 }
 
+void m4Close(m4Handle *dev) {
+  if (dev->usb_devh)
+    usb_close(dev->usb_devh);
+
+  free(dev);
+}
+
 int m4Read(m4Handle *dev, unsigned char *buf, unsigned int len, int timeout) {
   return usb_interrupt_read(dev->usb_devh, READ_ENDPOINT, (char*) buf, len, timeout);
 }

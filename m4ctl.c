@@ -114,6 +114,8 @@ int main (int argc, char **argv) {
     return -1;
   }
 
+  m4Close(dev);
+
   return 0;
 }
 

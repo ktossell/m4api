@@ -132,6 +132,9 @@ extern char* m4TypeDescs[];
 /* Find and open the PSU */
 struct m4Handle *m4Init();
 
+/* Close the device handle */
+void m4Close(struct m4Handle *dev);
+
 /* User-friendly-ish routines for setting/getting config values */
 int m4GetFloat(struct m4Handle *dev, enum m4FieldID fid, float *out);
 int m4SetFloat(struct m4Handle *dev, enum m4FieldID fid, float val);
