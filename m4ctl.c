@@ -24,7 +24,7 @@
 int main (int argc, char **argv) {
   int field_id;
   float val;
-  usb_dev_handle *dev;
+  struct m4Handle *dev;
 
   dev = m4Init();
 
@@ -46,7 +46,7 @@ int main (int argc, char **argv) {
 	}
 
 	printf("-- %d\n", time(NULL));	
-	m4PrintDiag(diagBuf);
+	m4PrintDiag(dev, diagBuf);
 
 	sleep(1);
       }
@@ -56,7 +56,7 @@ int main (int argc, char **argv) {
         return -1;
       }
 
-      m4PrintDiag(diagBuf);
+      m4PrintDiag(dev, diagBuf);
     }
   } else if (argc >= 2 && !strcmp(argv[1], "-config")) {
     /* with no further args after -config, print them all */
@@ -69,7 +69,7 @@ int main (int argc, char **argv) {
 	  
 	m4GetConfig(dev, field, configBuf);
 	  
-	m4PrintVal(field->type, m4GetVal(field->type, &configBuf[4]));
+	m4PrintVal(dev, field->type, m4GetVal(dev, field->type, &configBuf[4]));
 	  
 	if (*m4TypeDescs[field->type] != 0)
 	  printf(" %s\n", m4TypeDescs[field->type]);
@@ -79,7 +79,7 @@ int main (int argc, char **argv) {
       }
     } else {
       /* we got a field name; first verify it */
-      int field_id = m4ConfigField(argv[2]);
+      int field_id = m4ConfigField(dev, argv[2]);
 
       if (field_id < 0) {
 	fprintf(stderr, "%s: Invalid configuration field\n", argv[2]);
@@ -93,7 +93,7 @@ int main (int argc, char **argv) {
       } else {
 	m4GetConfig(dev, field, configBuf);
 
-	m4PrintVal(field->type, m4GetVal(field->type, &configBuf[4]));
+	m4PrintVal(dev, field->type, m4GetVal(dev, field->type, &configBuf[4]));
 
 	if (&m4TypeDescs[field->type] != 0)
 	  printf(" %s\n", m4TypeDescs[field->type]);

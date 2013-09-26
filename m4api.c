@@ -17,6 +17,7 @@
  */
 
 #include <stdio.h>
+#include <string.h>
 #include <usb.h>
 
 #include "m4api.h"
@@ -26,8 +27,15 @@ static size_t m4TypeLengths[13] = {
  1, 2, 2, 1, 1
 };
 
-static float m4TypeConversions[13] = {
+static float m4TypeConversions_v1[13] = {
  0.1123, 0.076625, 0.0375, 0.0188136,
+ 1.0, 1.0, 1.0, 1.0,
+ 10.0, 10.0, 1.0, 1.0,
+ 1.0
+};
+
+static float m4TypeConversions_v2[13] = {
+ 0.1552, 0.1165, 0.0389, 0.0195,
  1.0, 1.0, 1.0, 1.0,
  10.0, 10.0, 1.0, 1.0,
  1.0
@@ -115,9 +123,24 @@ struct m4ConfigField m4ConfigFields[47] = {
 #define WRITE_ENDPOINT 0x01
 #define TIMEOUT 3000
 
-usb_dev_handle *m4Init() {
+typedef struct m4Handle {
+  struct usb_dev_handle *usb_devh;
+  int version;
+} m4Handle;
+
+static float* _m4GetConversionsTable(m4Handle *dev) {
+  if (dev->version >= 0x20)
+    return m4TypeConversions_v2;
+  else
+    return m4TypeConversions_v1;
+}
+
+m4Handle *m4Init() {
   struct usb_bus *bus;
   struct usb_device *dev;
+  usb_dev_handle *usb_devh = NULL;
+  m4Handle *m4_handle = NULL;
+  char diag_buf[24];
 
   usb_init();
 
@@ -131,35 +154,26 @@ usb_dev_handle *m4Init() {
 
   bus = usb_get_busses();
 
-  while (bus) {
+  while (bus && !usb_devh) {
     dev = bus->devices;
 
-    while (dev) {
+    while (dev && !usb_devh) {
       if (dev->descriptor.idVendor == VENDOR &&
           dev->descriptor.idProduct == PRODUCT) {
-	usb_dev_handle *handle = usb_open(dev);
+	usb_devh = usb_open(dev);
 
-	if (handle) {
+	if (usb_devh) {
 #ifdef LIBUSB_HAS_DETACH_KERNEL_DRIVER_NP
           /* Linux usually claims HID devices for its usbhid driver. */
-          usb_detach_kernel_driver_np(handle, 0);
+          usb_detach_kernel_driver_np(usb_devh, 0);
 #endif
-	  if (usb_set_configuration(handle, 1) >= 0) {
-	    if (usb_claim_interface(handle, 0) >= 0) {
-	      if (usb_set_altinterface(handle, 0) < 0) {
-	        usb_close(handle);
-		return NULL;
-              }
-	    } else {
-	      usb_close(handle);
-	      return NULL;
-	    }
-	  } else {
-	    usb_close(handle);
-	    return NULL;
+	  if (usb_set_configuration(usb_devh, 1) < 0
+	      || usb_claim_interface(usb_devh, 0) < 0
+	      || usb_set_altinterface(usb_devh, 0) < 0) {
+	    usb_close(usb_devh);
+	    usb_devh = NULL;
+	    continue;
 	  }
-
-	  return handle;
 	}
       }
 
@@ -169,18 +183,42 @@ usb_dev_handle *m4Init() {
     bus = bus->next;
   }
 
+  if (!usb_devh)
+    goto fail;
+
+  m4_handle = (m4Handle*) malloc(sizeof(m4Handle));
+  if (!m4_handle)
+    goto fail;
+
+  memset(m4_handle, 0, sizeof(m4Handle));
+  m4_handle->usb_devh = usb_devh;
+
+  if (m4FetchDiag(m4_handle, diag_buf) < 0)
+    goto fail;
+
+  m4_handle->version = diag_buf[23];
+
+  return m4_handle;
+
+ fail:
+  if (m4_handle)
+    free(m4_handle);
+
+  if (usb_devh)
+    usb_close(usb_devh);
+
   return NULL;
 }
 
-int m4Read(usb_dev_handle *dev, unsigned char *buf, unsigned int len, int timeout) {
-  return usb_interrupt_read(dev, READ_ENDPOINT, (char*) buf, len, timeout);
+int m4Read(m4Handle *dev, unsigned char *buf, unsigned int len, int timeout) {
+  return usb_interrupt_read(dev->usb_devh, READ_ENDPOINT, (char*) buf, len, timeout);
 }
 
-int m4Write(usb_dev_handle *dev, unsigned char *buf, unsigned int len, int timeout) {
-  return usb_interrupt_write(dev, WRITE_ENDPOINT, (char*) buf, len, timeout);
+int m4Write(m4Handle *dev, unsigned char *buf, unsigned int len, int timeout) {
+  return usb_interrupt_write(dev->usb_devh, WRITE_ENDPOINT, (char*) buf, len, timeout);
 }
 
-int m4FetchDiag (usb_dev_handle *dev, char *buf) {
+int m4FetchDiag(m4Handle *dev, char *buf) {
   unsigned char pollCmd[] = {0x81, 0x00};
   
   if (m4Write(dev, pollCmd, 2, TIMEOUT) != 2)
@@ -195,27 +233,28 @@ int m4FetchDiag (usb_dev_handle *dev, char *buf) {
   return 0;
 }
 
-int m4GetDiag (usb_dev_handle *dev, struct m4Diagnostics *diag) {
+int m4GetDiag(m4Handle *dev, struct m4Diagnostics *diag) {
   char buf[24];
   int field_id;
 
   if (m4FetchDiag(dev, buf) < 0)
     return -1;
 
-  diag->vin = m4GetVal(M4_VLT_12_11, buf + 2);
-  diag->vign = m4GetVal(M4_VLT_12_11, buf + 3);
-  diag->v33 = m4GetVal(M4_VLT_33_01, buf + 4);
-  diag->v5 = m4GetVal(M4_VLT_5_03, buf + 5);
-  diag->v12 = m4GetVal(M4_VLT_12_07, buf + 6);
-  diag->temp = m4GetVal(M4_DEG, buf + 12);
+  diag->vin = m4GetVal(dev, M4_VLT_12_11, buf + 2);
+  diag->vign = m4GetVal(dev, M4_VLT_12_11, buf + 3);
+  diag->v33 = m4GetVal(dev, M4_VLT_33_01, buf + 4);
+  diag->v5 = m4GetVal(dev, M4_VLT_5_03, buf + 5);
+  diag->v12 = m4GetVal(dev, M4_VLT_12_07, buf + 6);
+  diag->temp = m4GetVal(dev, M4_DEG, buf + 12);
 
   return 0;
 }
 
-float m4GetVal(enum m4Type type, char *posn) {
+float m4GetVal(m4Handle *dev, enum m4Type type, char *posn) {
   float val;
   short tmp_sh;
   int tmp_i;
+  float *conversions;
 
   switch (m4TypeLengths[type]) {
     case 1:
@@ -237,12 +276,13 @@ float m4GetVal(enum m4Type type, char *posn) {
 
   // printf("%x ", tmp_i);
 
-  val = tmp_i * m4TypeConversions[type];
+  conversions = _m4GetConversionsTable(dev);
+  val = tmp_i * conversions[type];
 
   return val;
 }
 
-void m4PrintVal(enum m4Type type, float val) {
+void m4PrintVal(m4Handle *dev, enum m4Type type, float val) {
   int tmp_i, sec, min, hr;
 
   switch (m4TypeForms[type]) {
@@ -274,7 +314,7 @@ void m4PrintVal(enum m4Type type, float val) {
   }
 }
 
-int m4GetConfig(usb_dev_handle *dev, struct m4ConfigField *field, char *buf) {
+int m4GetConfig(m4Handle *dev, struct m4ConfigField *field, char *buf) {
   unsigned char cmd[24] = {0xa4, 0xa1};
 
   cmd[2] = field->index;
@@ -292,19 +332,21 @@ int m4GetConfig(usb_dev_handle *dev, struct m4ConfigField *field, char *buf) {
   return 0;
 }
 
-int m4ParseValue(enum m4Type type, char const *strval, char *buf) {
+int m4ParseValue(m4Handle *dev, enum m4Type type, char const *strval, char *buf) {
   int intval;
   float fval;
 
   int hr, min, sec;
 
+  float *conversions = _m4GetConversionsTable(dev);
+
   switch(m4TypeForms[type]) {
   case M4_INTEG:
-    intval = atoi(strval) / (int) m4TypeConversions[type];
+    intval = atoi(strval) / (int) conversions[type];
     break;
   case M4_FLOAT:
     fval = atof(strval);
-    intval = fval / m4TypeConversions[type];
+    intval = fval / conversions[type];
     break;
   case M4_TIMER:
     if (!strcasecmp("never", strval))
@@ -328,7 +370,7 @@ int m4ParseValue(enum m4Type type, char const *strval, char *buf) {
   return 0;
 }
 
-int m4GetFloat(usb_dev_handle *dev, enum m4FieldID fid, float *out) {
+int m4GetFloat(m4Handle *dev, enum m4FieldID fid, float *out) {
   char buf[24];
   struct m4ConfigField *field;
   
@@ -337,19 +379,21 @@ int m4GetFloat(usb_dev_handle *dev, enum m4FieldID fid, float *out) {
   if (m4GetConfig(dev, field, buf))
     return -1;
 
-  *out = m4GetVal(field->type, &buf[4]);
+  *out = m4GetVal(dev, field->type, &buf[4]);
 
   return 0;
 }
 
-int m4SetFloat(usb_dev_handle *dev, enum m4FieldID fid, float val) {
+int m4SetFloat(m4Handle *dev, enum m4FieldID fid, float val) {
   char binary[2];
   int ival;
   struct m4ConfigField *field;
-  
-  field = &m4ConfigFields[fid];
+  float *conversions;
 
-  ival = val / m4TypeConversions[field->type];
+  field = &m4ConfigFields[fid];
+  conversions = _m4GetConversionsTable(dev);
+
+  ival = val / conversions[field->type];
 
   if (m4TypeLengths[field->type] == 2) {
     binary[0] = ival >> 8;
@@ -362,7 +406,7 @@ int m4SetFloat(usb_dev_handle *dev, enum m4FieldID fid, float val) {
   return m4SetBinary(dev, field, binary);
 }
 
-int m4GetInteger(usb_dev_handle *dev, enum m4FieldID fid, int *out) {
+int m4GetInteger(m4Handle *dev, enum m4FieldID fid, int *out) {
   char buf[24];
   struct m4ConfigField *field;
     
@@ -371,18 +415,19 @@ int m4GetInteger(usb_dev_handle *dev, enum m4FieldID fid, int *out) {
   if (m4GetConfig(dev, field, buf))
     return -1;
 
-  *out = (int) m4GetVal(field->type, &buf[4]);
+  *out = (int) m4GetVal(dev, field->type, &buf[4]);
 
   return 0;
 }
 
-int m4SetInteger(usb_dev_handle *dev, enum m4FieldID fid, int val) {
+int m4SetInteger(m4Handle *dev, enum m4FieldID fid, int val) {
   char binary[2];
   struct m4ConfigField *field;
+  float *conversions = _m4GetConversionsTable(dev);
 
   field = &m4ConfigFields[fid];
 
-  val /= m4TypeConversions[field->type];
+  val /= conversions[field->type];
 
   if (m4TypeLengths[field->type] == 2) {
     binary[0] = val >> 8;
@@ -395,16 +440,16 @@ int m4SetInteger(usb_dev_handle *dev, enum m4FieldID fid, int val) {
   return m4SetBinary(dev, field, binary);
 }
 
-int m4SetConfig(usb_dev_handle *dev, struct m4ConfigField *field, char const *strval) {
+int m4SetConfig(m4Handle *dev, struct m4ConfigField *field, char const *strval) {
   char binary[] = {0, 0};
 
-  if (m4ParseValue(field->type, strval, binary) < 0)
+  if (m4ParseValue(dev, field->type, strval, binary) < 0)
     return -1;
 
   return m4SetBinary(dev, field, binary);
 }
 
-int m4SetBinary(usb_dev_handle *dev, struct m4ConfigField *field, char const *val) {
+int m4SetBinary(m4Handle *dev, struct m4ConfigField *field, char const *val) {
   char buf[24];
   unsigned char cmd[24] = {0xa4, 0xa0};
 
@@ -426,20 +471,20 @@ int m4SetBinary(usb_dev_handle *dev, struct m4ConfigField *field, char const *va
   return 0;
 }
 
-void m4PrintDiag(char *buf) {
+void m4PrintDiag(m4Handle *dev, char *buf) {
   int field_id;
   size_t config_offset = 0;
   float value;
 
   for (field_id = 0; field_id < m4NumDiagFields; ++field_id) {
     printf("%s:\t", m4DiagFields[field_id].name);
-    value = m4GetVal(m4DiagFields[field_id].type, buf + m4DiagFields[field_id].index);
-    m4PrintVal(m4DiagFields[field_id].type, value);
+    value = m4GetVal(dev, m4DiagFields[field_id].type, buf + m4DiagFields[field_id].index);
+    m4PrintVal(dev, m4DiagFields[field_id].type, value);
     puts("");
   }
 }
 
-int m4ConfigField(char const *name) {
+int m4ConfigField(m4Handle *dev, char const *name) {
   int field_id;
 
   for (field_id = 0; field_id < M4_NUM_CONFIG_FIELDS; ++field_id) {

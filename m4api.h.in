@@ -123,45 +123,47 @@ struct m4Diagnostics {
   float temp;
 };
 
+struct m4Handle;
+
 extern struct m4DiagField m4DiagFields[];
 extern struct m4ConfigField m4ConfigFields[];
 extern char* m4TypeDescs[];
 
 /* Find and open the PSU */
-struct usb_dev_handle *m4Init();
+struct m4Handle *m4Init();
 
 /* User-friendly-ish routines for setting/getting config values */
-int m4GetFloat(struct usb_dev_handle *dev, enum m4FieldID fid, float *out);
-int m4SetFloat(struct usb_dev_handle *dev, enum m4FieldID fid, float val);
-int m4GetInteger(struct usb_dev_handle *dev, enum m4FieldID fid, int *out);
-int m4SetInteger(struct usb_dev_handle *dev, enum m4FieldID fid, int val);
+int m4GetFloat(struct m4Handle *dev, enum m4FieldID fid, float *out);
+int m4SetFloat(struct m4Handle *dev, enum m4FieldID fid, float val);
+int m4GetInteger(struct m4Handle *dev, enum m4FieldID fid, int *out);
+int m4SetInteger(struct m4Handle *dev, enum m4FieldID fid, int val);
 
 /* Get the diagnostic string in its raw form (<0 = error) */
-int m4FetchDiag (struct usb_dev_handle *dev, char *buf);
+int m4FetchDiag(struct m4Handle *dev, char *buf);
 
 /* Get the diagnostic values in processed form (<0 = error) */
-int m4GetDiag (struct usb_dev_handle *dev, struct m4Diagnostics *diag);
+int m4GetDiag(struct m4Handle *dev, struct m4Diagnostics *diag);
 
 /* Get a floating-point representation of the value stored at specified memory location */
-float m4GetVal(enum m4Type type, char *posn);
+float m4GetVal(struct m4Handle *dev, enum m4Type type, char *posn);
 
 /* Print the formatted value of the element of type `type' and value `val' */
-void m4PrintVal(enum m4Type type, float val);
+void m4PrintVal(struct m4Handle *dev, enum m4Type type, float val);
 
 /* Load the field's value from the PSU into buf */
-int m4GetConfig(struct usb_dev_handle *dev, struct m4ConfigField *field, char *buf);
+int m4GetConfig(struct m4Handle *dev, struct m4ConfigField *field, char *buf);
 
 /* Parse a value (123, 1.23 or 00:00:10) into buffer, encoding it */
-int m4ParseValue(enum m4Type type, char const *strval, char *buf);
+int m4ParseValue(struct m4Handle *dev, enum m4Type type, char const *strval, char *buf);
 
 /* Write the human-readable value to the field on the PSU */
-int m4SetConfig(struct usb_dev_handle *dev, struct m4ConfigField *field, char const *strval);
+int m4SetConfig(struct m4Handle *dev, struct m4ConfigField *field, char const *strval);
 
 /* Print the status variables in the (raw) buffer */
-void m4PrintDiag(char *buf);
+void m4PrintDiag(struct m4Handle *dev, char *buf);
 
 /* Find the m4ConfigField of the given name */
-int m4ConfigField(char const *name);
+int m4ConfigField(struct m4Handle *dev, char const *name);
 
 #ifdef __cplusplus
 }
